@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { motion, useScroll, useTransform } from 'framer-motion'
+import { LaunchButton } from '@/components/ui/launch-button'
 
 export default function HeroContent() {
   const { scrollY } = useScroll()
@@ -61,7 +62,7 @@ export default function HeroContent() {
               key={i}
               initial={{ opacity: 0, y: 40, clipPath: 'inset(100% 0% 0% 0%)' }}
               animate={{ opacity: 1, y: 0, clipPath: 'inset(0% 0% 0% 0%)' }}
-              transition={{ delay: 0.5 + i * 0.14, duration: 0.85, ease: [0.16, 1, 0.3, 1] }}
+              transition={{ delay: 0.5 + i * 0.14, duration: 0.85, ease: [0.16, 1, 0.3, 1] as const }}
               style={{ display: 'block', textShadow: '0 0 80px rgba(0,255,255,0.10)' }}
             >
               {line}
@@ -94,7 +95,7 @@ export default function HeroContent() {
           transition={{ delay: 1.3, duration: 0.7 }}
         >
           <Link href="/workflow">
-            <button className="cta-btn">Launch App →</button>
+            <LaunchButton label="Launch App" />
           </Link>
         </motion.div>
       </motion.div>

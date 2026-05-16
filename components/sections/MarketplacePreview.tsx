@@ -122,7 +122,7 @@ function AgentCard({ agent, index }: { agent: Agent; index: number }) {
         initial={{ opacity: 0, y: 40, x: slideFrom }}
         whileInView={{ opacity: 1, y: 0, x: 0 }}
         viewport={{ once: true, margin: '-50px' }}
-        transition={{ delay: index * 0.08, duration: 0.75, ease: [0.16, 1, 0.3, 1] }}
+        transition={{ delay: index * 0.08, duration: 0.75, ease: [0.16, 1, 0.3, 1] as const }}
         onMouseMove={onMouseMove}
         onMouseLeave={onMouseLeave}
         className="group relative cursor-none overflow-hidden"
@@ -240,7 +240,7 @@ export default function MarketplacePreview() {
           <motion.div
             initial={{ scaleX: 0 }}
             animate={inView ? { scaleX: 1 } : {}}
-            transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
+            transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] as const }}
             style={{ height: 1, width: 48, background: P, boxShadow: `0 0 10px ${P}`, transformOrigin: 'left', marginBottom: 18 }}
           />
           <motion.p

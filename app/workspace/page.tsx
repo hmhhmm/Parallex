@@ -38,7 +38,35 @@ export default function WorkspacePage() {
   }
 
   return (
-    <main style={{ width: '100vw', minHeight: '100vh', background: '#070710', overflow: 'hidden' }}>
+    <main style={{ width: '100vw', minHeight: '100vh', background: '#070710', overflow: 'hidden', position: 'relative' }}>
+      {/* Subtle grid */}
+      <div style={{
+        position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0,
+        backgroundImage: 'linear-gradient(rgba(131,110,251,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(131,110,251,0.04) 1px, transparent 1px)',
+        backgroundSize: '52px 52px',
+      }} />
+      {/* Top-left purple glow */}
+      <div style={{
+        position: 'absolute', top: -120, left: -120,
+        width: 480, height: 480, borderRadius: '50%',
+        background: 'radial-gradient(circle, rgba(131,110,251,0.12) 0%, transparent 70%)',
+        pointerEvents: 'none', zIndex: 0,
+      }} />
+      {/* Bottom-right cyan glow */}
+      <div style={{
+        position: 'absolute', bottom: -100, right: -100,
+        width: 400, height: 400, borderRadius: '50%',
+        background: 'radial-gradient(circle, rgba(0,209,255,0.08) 0%, transparent 70%)',
+        pointerEvents: 'none', zIndex: 0,
+      }} />
+      {/* Center faint glow behind content */}
+      <div style={{
+        position: 'absolute', top: '30%', left: '50%', transform: 'translateX(-50%)',
+        width: 600, height: 400, borderRadius: '50%',
+        background: 'radial-gradient(ellipse, rgba(131,110,251,0.06) 0%, transparent 70%)',
+        pointerEvents: 'none', zIndex: 0,
+      }} />
+
       <WorkspaceCursor />
       <Topbar step={step} />
 
@@ -46,6 +74,7 @@ export default function WorkspacePage() {
         display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
         minHeight: '100vh', paddingTop: 96, paddingBottom: 48,
         paddingLeft: 24, paddingRight: 24,
+        position: 'relative', zIndex: 1,
       }}>
         <div style={{ width: '100%', maxWidth: 520 }}>
           <AnimatePresence mode="wait">

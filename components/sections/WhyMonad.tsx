@@ -4,14 +4,12 @@ import { useRef, useState, useEffect } from 'react'
 import { motion, useInView } from 'framer-motion'
 import { Zap, DollarSign, Layers } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import dynamic from 'next/dynamic'
-import SectionAmbient from '@/components/ui/SectionAmbient'
-const ParticleResidue = dynamic(() => import('@/components/ui/ParticleResidue'), { ssr: false })
 
 const P = '#836EFB'
 const L = '#CCFF00'
+const C = '#00D1FF'
 
-function useCountUp(target: number, inView: boolean, duration = 2000) {
+function useCountUp(target: number, inView: boolean, duration = 2200) {
   const [value, setValue] = useState(0)
   useEffect(() => {
     if (!inView) return
@@ -19,7 +17,7 @@ function useCountUp(target: number, inView: boolean, duration = 2000) {
     let raf: number
     const tick = (now: number) => {
       const p = Math.min((now - start) / duration, 1)
-      const eased = 1 - Math.pow(1 - p, 3)
+      const eased = 1 - Math.pow(1 - p, 4)
       setValue(Math.round(eased * target))
       if (p < 1) raf = requestAnimationFrame(tick)
     }
@@ -38,6 +36,7 @@ interface Stat {
   label: string
   sub: string
   color: string
+  tag: string
 }
 
 const STATS: Stat[] = [
@@ -49,6 +48,7 @@ const STATS: Stat[] = [
     label: 'Transactions per second',
     sub: '50× faster than Ethereum mainnet',
     color: P,
+    tag: 'THROUGHPUT',
   },
   {
     icon: DollarSign,
@@ -57,7 +57,8 @@ const STATS: Stat[] = [
     unit: 'Per Tx',
     label: 'Ultra-low gas cost',
     sub: 'Agent micro-payments are actually viable',
-    color: '#00D1FF',
+    color: C,
+    tag: 'GAS COST',
   },
   {
     icon: Layers,
@@ -67,113 +68,150 @@ const STATS: Stat[] = [
     label: 'Drop-in for Ethereum',
     sub: 'All Solidity tools work out of the box',
     color: L,
+    tag: 'COMPATIBILITY',
   },
 ]
 
+const CHAINS = [
+  { chain: 'Ethereum', tps: '~15',     color: '#627EEA', width: '0.15%' },
+  { chain: 'Solana',   tps: '~2,000',  color: '#9945FF', width: '20%'   },
+  { chain: 'Monad',    tps: '10,000+', color: L,         width: '100%', highlight: true },
+]
+
 function TpsBar({ inView }: { inView: boolean }) {
+  const heights = [22, 28, 18, 32, 24, 30, 20, 34, 26, 32, 18, 28, 24, 30, 22, 36, 26, 30]
   return (
-    <div style={{ display: 'flex', gap: 2, alignItems: 'flex-end', height: 32, marginBottom: 8 }}>
-      {Array.from({ length: 18 }, (_, i) => {
-        const h = 20 + Math.sin(i * 0.8) * 10 + Math.random() * 8
-        return (
-          <motion.div
-            key={i}
-            initial={{ height: 4 }}
-            animate={inView ? { height: h } : { height: 4 }}
-            transition={{ delay: 0.6 + i * 0.04, duration: 0.5, ease: 'easeOut' }}
-            style={{ width: 6, borderRadius: 2, background: P, opacity: 0.35 + (i / 18) * 0.65 }}
-          />
-        )
-      })}
+    <div style={{ display: 'flex', gap: 3, alignItems: 'flex-end', height: 36, marginBottom: 12 }}>
+      {heights.map((h, i) => (
+        <motion.div
+          key={i}
+          initial={{ height: 3, opacity: 0 }}
+          animate={inView ? { height: h, opacity: 0.3 + (i / heights.length) * 0.7 } : {}}
+          transition={{ delay: 0.5 + i * 0.035, duration: 0.5, ease: EASE }}
+          style={{ width: 5, borderRadius: 2, background: `linear-gradient(to top, ${P}40, ${P})` }}
+        />
+      ))}
     </div>
   )
 }
 
-function StatCard({ stat, index, sectionInView }: { stat: Stat; index: number; sectionInView: boolean }) {
+const EASE = [0.16, 1, 0.3, 1] as const
+
+const cardVariants = {
+  hidden: { opacity: 0, y: 48, scale: 0.96 },
+  visible: (i: number) => ({
+    opacity: 1, y: 0, scale: 1,
+    transition: { delay: 0.2 + i * 0.15, duration: 0.8, ease: EASE },
+  }),
+}
+
+function StatCard({ stat, index, inView }: { stat: Stat; index: number; inView: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
-  const cardInView = useInView(ref, { once: true, margin: '-60px' })
-  const count = useCountUp(stat.countTarget ?? 0, sectionInView && cardInView)
+  const cardInView = useInView(ref, { once: true, margin: '-40px' })
+  const count = useCountUp(stat.countTarget ?? 0, inView && cardInView)
   const Icon = stat.icon
 
   return (
     <motion.div
       ref={ref}
-      initial={{ opacity: 0, y: 32 }}
-      animate={sectionInView ? { opacity: 1, y: 0 } : {}}
-      transition={{ delay: 0.25 + index * 0.15, duration: 0.85, ease: [0.16, 1, 0.3, 1] }}
+      custom={index}
+      variants={cardVariants}
+      initial="hidden"
+      animate={inView ? 'visible' : 'hidden'}
+      whileHover={{ y: -4, transition: { duration: 0.3 } }}
       style={{
-        background: `rgba(255,255,255,0.02)`,
-        border: `1px solid ${stat.color}20`,
-        borderRadius: 16,
-        padding: '28px 24px',
         position: 'relative',
+        borderRadius: 20,
         overflow: 'hidden',
+        padding: '1px',
+        background: `linear-gradient(135deg, ${stat.color}30, transparent 60%)`,
       }}
     >
-      {/* Background glow */}
+      {/* Inner card */}
       <div style={{
-        position: 'absolute', top: 0, left: 0, right: 0, height: 1,
-        background: `linear-gradient(to right, transparent, ${stat.color}50, transparent)`,
-      }} />
-      <div style={{
-        position: 'absolute', top: -40, right: -40, width: 120, height: 120, borderRadius: '50%',
-        background: `${stat.color}08`, filter: 'blur(30px)', pointerEvents: 'none',
-      }} />
-
-      {/* Icon + label row */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        background: 'rgba(8,7,20,0.92)',
+        borderRadius: 19,
+        padding: '28px 26px 24px',
+        height: '100%',
+        position: 'relative',
+        overflow: 'hidden',
+      }}>
+        {/* Corner glow */}
         <div style={{
-          width: 38, height: 38, borderRadius: 10,
-          background: `${stat.color}14`, border: `1px solid ${stat.color}28`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <Icon size={18} color={stat.color} strokeWidth={1.5} />
-        </div>
+          position: 'absolute', top: -60, right: -60,
+          width: 160, height: 160, borderRadius: '50%',
+          background: `${stat.color}10`, filter: 'blur(40px)',
+          pointerEvents: 'none',
+        }} />
+
+        {/* Top stripe */}
         <div style={{
-          fontSize: 9, color: `${stat.color}80`, letterSpacing: '0.25em',
-          textTransform: 'uppercase', fontFamily: 'var(--font-space-grotesk)',
-        }}>
-          MONAD
+          position: 'absolute', top: 0, left: 0, right: 0, height: 1,
+          background: `linear-gradient(to right, transparent, ${stat.color}60, transparent)`,
+        }} />
+
+        {/* Icon + tag */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: 12,
+            background: `${stat.color}15`,
+            border: `1px solid ${stat.color}30`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Icon size={20} color={stat.color} strokeWidth={1.5} />
+          </div>
+          <span style={{
+            fontSize: 8, color: `${stat.color}70`, letterSpacing: '0.3em',
+            textTransform: 'uppercase', fontFamily: 'var(--font-space-grotesk)', fontWeight: 600,
+          }}>
+            {stat.tag}
+          </span>
         </div>
-      </div>
 
-      {/* Mini bar chart for TPS card */}
-      {index === 0 && <TpsBar inView={sectionInView && cardInView} />}
+        {/* TPS bar (first card only) */}
+        {index === 0 && <TpsBar inView={inView && cardInView} />}
 
-      {/* Big number */}
-      <div style={{
-        fontSize: 'clamp(42px, 5.5vw, 72px)',
-        fontWeight: 700, color: '#fff',
-        lineHeight: 1, marginBottom: 6,
-        letterSpacing: '-0.04em',
-        fontFamily: 'var(--font-space-grotesk)',
-        textShadow: `0 0 40px ${stat.color}25`,
-      }}>
-        {stat.display === 'count' ? count.toLocaleString() : stat.textValue}
-      </div>
+        {/* Big value */}
+        <div style={{
+          fontSize: 'clamp(48px, 5.5vw, 76px)',
+          fontWeight: 800, color: '#fff',
+          lineHeight: 1, letterSpacing: '-0.05em',
+          fontFamily: 'var(--font-space-grotesk)',
+          marginBottom: 4,
+          textShadow: `0 0 60px ${stat.color}30`,
+        }}>
+          {stat.display === 'count' ? count.toLocaleString() : stat.textValue}
+        </div>
 
-      {/* Unit */}
-      <div style={{
-        fontSize: 12, fontWeight: 600, color: stat.color,
-        marginBottom: 6, letterSpacing: '0.2em',
-        textTransform: 'uppercase', fontFamily: 'var(--font-space-grotesk)',
-      }}>
-        {stat.unit}
-      </div>
+        {/* Unit */}
+        <div style={{
+          fontSize: 11, fontWeight: 700, color: stat.color,
+          letterSpacing: '0.25em', textTransform: 'uppercase',
+          fontFamily: 'var(--font-space-grotesk)', marginBottom: 4,
+        }}>
+          {stat.unit}
+        </div>
 
-      {/* Label */}
-      <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', fontFamily: 'var(--font-space-grotesk)', marginBottom: 10 }}>
-        {stat.label}
-      </div>
+        {/* Label */}
+        <div style={{
+          fontSize: 12, color: 'rgba(255,255,255,0.3)',
+          fontFamily: 'var(--font-space-grotesk)', marginBottom: 18,
+        }}>
+          {stat.label}
+        </div>
 
-      {/* Sub-detail */}
-      <div style={{
-        fontSize: 11, color: `${stat.color}70`,
-        fontFamily: 'var(--font-space-grotesk)', lineHeight: 1.5,
-        padding: '8px 10px', borderRadius: 8,
-        background: `${stat.color}08`, border: `1px solid ${stat.color}15`,
-      }}>
-        {stat.sub}
+        {/* Sub pill */}
+        <div style={{
+          fontSize: 11, color: `${stat.color}80`,
+          fontFamily: 'var(--font-space-grotesk)',
+          padding: '7px 12px', borderRadius: 8,
+          background: `${stat.color}08`,
+          border: `1px solid ${stat.color}18`,
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+        }}>
+          <div style={{ width: 4, height: 4, borderRadius: '50%', background: stat.color, flexShrink: 0 }} />
+          {stat.sub}
+        </div>
       </div>
     </motion.div>
   )
@@ -184,96 +222,118 @@ export default function WhyMonad() {
   const inView = useInView(ref, { once: true, margin: '-80px' })
 
   return (
-    <section ref={ref} className="relative py-36 px-6">
-      <div className="absolute inset-0" style={{ background: 'linear-gradient(to bottom, rgba(3,2,10,0.9), rgba(3,2,10,0.96), rgba(3,2,10,0.9))' }} />
-      <SectionAmbient variant="blue" />
-      <ParticleResidue variant="blue" count={70} lineColor="131,110,251" />
+    <section ref={ref} className="relative py-36 px-6 overflow-hidden">
+      {/* Background */}
+      <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(3,2,10,0.95) 0%, rgba(5,3,18,0.98) 50%, rgba(3,2,10,0.95) 100%)' }} />
+
+      {/* Center radial glow */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={inView ? { opacity: 1 } : {}}
+        transition={{ duration: 1.5 }}
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background: `radial-gradient(ellipse 60% 50% at 50% 30%, ${P}0A 0%, transparent 70%)`,
+        }}
+      />
+
+      {/* Subtle grid */}
+      <div className="absolute inset-0 pointer-events-none" style={{
+        backgroundImage: `linear-gradient(rgba(131,110,251,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(131,110,251,0.025) 1px, transparent 1px)`,
+        backgroundSize: '48px 48px',
+      }} />
 
       <div className="relative max-w-5xl mx-auto">
+
         {/* Header */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 72 }}>
-          <motion.div
-            initial={{ scaleX: 0 }} animate={inView ? { scaleX: 1 } : {}}
-            transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
-            style={{ height: 1, width: 48, background: P, boxShadow: `0 0 10px ${P}`, transformOrigin: 'left', marginBottom: 18 }}
-          />
+        <motion.div
+          className="flex flex-col items-center mb-20"
+          initial="hidden"
+          animate={inView ? 'visible' : 'hidden'}
+          variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.1 } } }}
+        >
           <motion.p
-            initial={{ opacity: 0 }} animate={inView ? { opacity: 1 } : {}}
-            transition={{ duration: 0.7 }}
-            style={{ fontSize: 9, letterSpacing: '0.55em', color: P, textTransform: 'uppercase', marginBottom: 18, fontFamily: 'var(--font-space-grotesk)' }}
+            variants={{ hidden: { opacity: 0, y: 12 }, visible: { opacity: 1, y: 0, transition: { duration: 0.6 } } }}
+            style={{ fontSize: 9, letterSpacing: '0.55em', color: P, textTransform: 'uppercase', marginBottom: 16, fontFamily: 'var(--font-space-grotesk)' }}
           >
             WHY MONAD
           </motion.p>
 
           <motion.h2
-            initial={{ opacity: 0, y: 20 }} animate={inView ? { opacity: 1, y: 0 } : {}}
-            transition={{ delay: 0.1, duration: 0.8 }}
+            variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.8, ease: EASE } } }}
             style={{
-              fontSize: 'clamp(34px, 5.5vw, 70px)', fontWeight: 700, color: '#fff',
-              textAlign: 'center', marginBottom: 20, letterSpacing: '-0.03em',
-              textTransform: 'uppercase', fontFamily: 'var(--font-space-grotesk)', lineHeight: 1.0,
+              fontSize: 'clamp(36px, 5.5vw, 72px)', fontWeight: 800, color: '#fff',
+              textAlign: 'center', letterSpacing: '-0.04em', textTransform: 'uppercase',
+              fontFamily: 'var(--font-space-grotesk)', lineHeight: 1.0, marginBottom: 20,
             }}
           >
             Built for speed.<br />Built for scale.
           </motion.h2>
 
           <motion.p
-            initial={{ opacity: 0 }} animate={inView ? { opacity: 1 } : {}}
-            transition={{ delay: 0.25, duration: 0.8 }}
+            variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { duration: 0.8 } } }}
             style={{
-              fontSize: 16, lineHeight: 1.8, color: 'rgba(255,255,255,0.4)',
-              textAlign: 'center', maxWidth: 560,
-              fontFamily: 'var(--font-space-grotesk)',
+              fontSize: 15, lineHeight: 1.8, color: 'rgba(255,255,255,0.35)',
+              textAlign: 'center', maxWidth: 480, fontFamily: 'var(--font-space-grotesk)',
             }}
           >
-            Monad&apos;s parallel execution engine processes 10,000 transactions per second —
-            making real-time agent-to-agent payments not just possible, but instant.
+            10,000 TPS. Real-time agent payments. Fully on-chain.
           </motion.p>
-        </div>
+        </motion.div>
 
-        {/* Stats grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        {/* Stat cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           {STATS.map((stat, i) => (
-            <StatCard key={i} stat={stat} index={i} sectionInView={inView} />
+            <StatCard key={i} stat={stat} index={i} inView={inView} />
           ))}
         </div>
 
-        {/* Bottom comparison strip */}
+        {/* Chain comparison */}
         <motion.div
-          initial={{ opacity: 0, y: 16 }} animate={inView ? { opacity: 1, y: 0 } : {}}
-          transition={{ delay: 0.8, duration: 0.7 }}
+          initial={{ opacity: 0, y: 20 }}
+          animate={inView ? { opacity: 1, y: 0 } : {}}
+          transition={{ delay: 0.85, duration: 0.7 }}
           style={{
-            marginTop: 36,
-            padding: '16px 24px',
-            borderRadius: 12,
-            background: 'rgba(131,110,251,0.05)',
-            border: '1px solid rgba(131,110,251,0.15)',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            flexWrap: 'wrap', gap: 16,
+            borderRadius: 14,
+            background: 'rgba(255,255,255,0.02)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            padding: '20px 28px',
+            display: 'flex', flexDirection: 'column', gap: 14,
           }}
         >
-          {[
-            { chain: 'Ethereum', tps: '~15', color: '#627EEA' },
-            { chain: 'Solana',   tps: '~2,000', color: '#9945FF' },
-            { chain: 'Monad',    tps: '10,000+', color: L, highlight: true },
-          ].map(row => (
-            <div key={row.chain} style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 140 }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: row.color, boxShadow: row.highlight ? `0 0 10px ${row.color}` : 'none' }} />
-              <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', fontFamily: 'var(--font-space-grotesk)', minWidth: 72 }}>{row.chain}</span>
-              <div style={{ flex: 1, height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.05)', overflow: 'hidden' }}>
+          {CHAINS.map((row, i) => (
+            <div key={row.chain} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{
+                width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                background: row.color,
+                boxShadow: row.highlight ? `0 0 10px ${row.color}` : 'none',
+              }} />
+              <span style={{
+                fontSize: 12, color: row.highlight ? '#fff' : 'rgba(255,255,255,0.35)',
+                fontFamily: 'var(--font-space-grotesk)', width: 80, flexShrink: 0,
+                fontWeight: row.highlight ? 600 : 400,
+              }}>
+                {row.chain}
+              </span>
+              <div style={{ flex: 1, height: 3, borderRadius: 99, background: 'rgba(255,255,255,0.04)', overflow: 'hidden' }}>
                 <motion.div
                   initial={{ width: 0 }}
-                  animate={inView ? { width: row.chain === 'Monad' ? '100%' : row.chain === 'Solana' ? '20%' : '0.15%' } : {}}
-                  transition={{ delay: 0.9, duration: 1.2, ease: 'easeOut' }}
-                  style={{ height: '100%', borderRadius: 2, background: row.color }}
+                  animate={inView ? { width: row.width } : {}}
+                  transition={{ delay: 1 + i * 0.15, duration: 1.4, ease: EASE }}
+                  style={{ height: '100%', borderRadius: 99, background: row.color }}
                 />
               </div>
-              <span style={{ fontSize: 11, fontWeight: 700, color: row.highlight ? L : 'rgba(255,255,255,0.3)', fontFamily: 'monospace', minWidth: 60, textAlign: 'right' }}>
+              <span style={{
+                fontSize: 12, fontFamily: 'monospace', width: 80, textAlign: 'right', flexShrink: 0,
+                color: row.highlight ? L : 'rgba(255,255,255,0.25)',
+                fontWeight: row.highlight ? 700 : 400,
+              }}>
                 {row.tps} TPS
               </span>
             </div>
           ))}
         </motion.div>
+
       </div>
     </section>
   )

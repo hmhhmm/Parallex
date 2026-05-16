@@ -18,6 +18,18 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={spaceGrotesk.variable}>
+      <head>
+        {/* Suppress MetaMask extension unhandled rejections — not an app error */}
+        <script dangerouslySetInnerHTML={{ __html: `
+          window.addEventListener('unhandledrejection', function(e) {
+            if (e.reason && (
+              String(e.reason).includes('MetaMask') ||
+              String(e.reason?.message).includes('MetaMask') ||
+              String(e.reason?.message).includes('connect')
+            )) { e.preventDefault(); }
+          });
+        ` }} />
+      </head>
       <body className="bg-black antialiased">
         <PrivyProvider>{children}</PrivyProvider>
       </body>

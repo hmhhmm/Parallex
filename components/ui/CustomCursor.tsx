@@ -14,9 +14,6 @@ export default function CustomCursor() {
   const dotX = useSpring(mouseX, { stiffness: 700, damping: 38 })
   const dotY = useSpring(mouseY, { stiffness: 700, damping: 38 })
 
-  const ringX = useSpring(mouseX, { stiffness: 130, damping: 20 })
-  const ringY = useSpring(mouseY, { stiffness: 130, damping: 20 })
-
   useEffect(() => {
     setMounted(true)
     if ('ontouchstart' in window || navigator.maxTouchPoints > 0) return
@@ -75,35 +72,6 @@ export default function CustomCursor() {
         transition={{ duration: 0.15 }}
       />
 
-      {/* Outer ring */}
-      <motion.div
-        style={{
-          x: ringX,
-          y: ringY,
-          translateX: '-50%',
-          translateY: '-50%',
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: 34,
-          height: 34,
-          borderRadius: '50%',
-          border: '1px solid rgba(0,255,255,0.35)',
-          zIndex: 9998,
-          pointerEvents: 'none',
-        }}
-        animate={{
-          opacity: visible ? 1 : 0,
-          scale: hovering ? 2 : 1,
-          boxShadow: hovering
-            ? '0 0 20px rgba(0,255,255,0.4)'
-            : '0 0 10px rgba(0,255,255,0.15)',
-        }}
-        transition={{
-          opacity: { duration: 0.2 },
-          scale: { duration: 0.35, ease: 'easeOut' },
-        }}
-      />
     </>
   )
 }
