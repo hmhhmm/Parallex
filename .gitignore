@@ -16,11 +16,23 @@ node_modules/
 # Misc
 .DS_Store
 *.pem
+
+# Env files — block all .env files except .example templates
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+!.env*.example
+contracts/.env
+contracts/.env.*
+!contracts/.env.example
+
+# Hardhat build artifacts
+contracts/cache/
+contracts/artifacts/
+contracts/typechain-types/
+contracts/node_modules/
+
+# TypeScript incremental cache
+*.tsbuildinfo
 
 # Logs
 npm-debug.log*
