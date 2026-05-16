@@ -26,15 +26,20 @@ let _id = 0
 interface Props { active: boolean }
 
 export default function TxTicker({ active }: Props) {
-  const [txs, setTxs] = useState<Tx[]>(() =>
-    Array.from({ length: 12 }, () => ({
+  // Seed empty so server-rendered HTML matches the first client render.
+  // Math.random() during initial render causes a hydration mismatch.
+  const [txs, setTxs] = useState<Tx[]>([])
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Populate the initial 12 rows on the client only (post-hydration).
+  useEffect(() => {
+    setTxs(Array.from({ length: 12 }, () => ({
       id:     _id++,
       hash:   randomHash(),
       amount: randomAmount(),
       type:   TYPES[Math.floor(Math.random() * TYPES.length)],
-    }))
-  )
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+    })))
+  }, [])
 
   useEffect(() => {
     const rate = active ? 120 : 600

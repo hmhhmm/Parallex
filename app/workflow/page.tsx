@@ -1,14 +1,20 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Zap, ArrowLeft } from 'lucide-react'
+import { Zap, ArrowLeft, Wallet } from 'lucide-react'
 import Link from 'next/link'
+import { usePrivy, useWallets } from '@privy-io/react-auth'
 import WorkflowBuilder, { type AgentDef } from '@/components/workflow/WorkflowBuilder'
 import ExecutionTimeline from '@/components/workflow/ExecutionTimeline'
 import TxTicker from '@/components/workflow/TxTicker'
 import { useWorkflow } from '@/hooks/useWorkflow'
+import { publicClient } from '@/lib/chain'
+
+function shortAddr(addr: string): string {
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`
+}
 
 const PaymentParticleEffect = dynamic(
   () => import('@/components/workflow/PaymentParticleEffect'),
@@ -29,6 +35,27 @@ export default function WorkflowPage() {
 
   const cardRefs  = useRef<Record<string, HTMLDivElement | null>>({})
   const vaultRef  = useRef<HTMLDivElement | null>(null)
+
+  // Wallet state — live address + on-chain MON balance
+  const { ready, authenticated, login, logout } = usePrivy()
+  const { wallets } = useWallets()
+  const wallet = wallets[0]
+  const [balance, setBalance] = useState<string>('—')
+
+  useEffect(() => {
+    if (!wallet?.address) { setBalance('—'); return }
+    let cancelled = false
+    const refresh = () => {
+      publicClient
+        .getBalance({ address: wallet.address as `0x${string}` })
+        .then(wei => { if (!cancelled) setBalance((Number(wei) / 1e18).toFixed(3)) })
+        .catch(() => { if (!cancelled) setBalance('?') })
+    }
+    refresh()
+    // Refresh after a workflow finishes (balance has changed)
+    if (complete) refresh()
+    return () => { cancelled = true }
+  }, [wallet?.address, complete])
 
   const handleRun = useCallback(() => {
     if (workflow.length === 0) return
@@ -104,23 +131,75 @@ export default function WorkflowPage() {
           )}
         </AnimatePresence>
 
-        {/* Right: vault */}
-        <div
-          ref={vaultRef}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            padding: '6px 14px', borderRadius: 999,
-            background: running ? 'rgba(204,255,0,0.08)' : 'rgba(131,110,251,0.08)',
-            border: `1px solid ${running ? 'rgba(204,255,0,0.3)' : 'rgba(131,110,251,0.25)'}`,
-            transition: 'all 0.5s ease',
-          }}
-        >
-          <span style={{ fontSize: 14 }}>🏛️</span>
-          <div>
-            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.1em' }}>VAULT</div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: running ? L : P }}>2.84 MON</div>
-          </div>
-        </div>
+        {/* Right: wallet / vault */}
+        {(() => {
+          const isConnected = ready && authenticated && !!wallet?.address
+          const handleClick = () => {
+            if (!ready) return
+            if (!authenticated) login()
+            else logout()
+          }
+          return (
+            <div
+              ref={vaultRef}
+              role={isConnected ? undefined : 'button'}
+              tabIndex={isConnected ? -1 : 0}
+              onClick={isConnected ? undefined : handleClick}
+              title={isConnected ? `Click to disconnect (${wallet!.address})` : 'Connect wallet'}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '6px 14px', borderRadius: 999,
+                background: running
+                  ? 'rgba(204,255,0,0.08)'
+                  : isConnected
+                    ? 'rgba(131,110,251,0.08)'
+                    : 'rgba(131,110,251,0.18)',
+                border: `1px solid ${
+                  running
+                    ? 'rgba(204,255,0,0.3)'
+                    : isConnected
+                      ? 'rgba(131,110,251,0.25)'
+                      : 'rgba(131,110,251,0.5)'
+                }`,
+                cursor: ready ? (isConnected ? 'pointer' : 'pointer') : 'wait',
+                userSelect: 'none',
+                transition: 'all 0.5s ease',
+              }}
+              onMouseEnter={e => {
+                if (isConnected) e.currentTarget.style.borderColor = 'rgba(255,107,107,0.5)'
+              }}
+              onMouseLeave={e => {
+                if (isConnected) e.currentTarget.style.borderColor = running
+                  ? 'rgba(204,255,0,0.3)' : 'rgba(131,110,251,0.25)'
+              }}
+            >
+              {!ready ? (
+                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.05em' }}>
+                  Initialising…
+                </span>
+              ) : !isConnected ? (
+                <>
+                  <Wallet size={14} color={P} />
+                  <span style={{ fontSize: 11, color: '#fff', fontWeight: 700, letterSpacing: '0.15em' }}>
+                    {authenticated ? 'LOADING…' : 'CONNECT WALLET'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span style={{ fontSize: 14 }}>🏛️</span>
+                  <div style={{ lineHeight: 1.1 }}>
+                    <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.45)', letterSpacing: '0.08em', fontFamily: 'monospace' }}>
+                      {shortAddr(wallet!.address)}
+                    </div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: running ? L : P }}>
+                      {balance} MON
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )
+        })()}
       </header>
 
       {/* ── Main split layout ─────────────────────────────────── */}
