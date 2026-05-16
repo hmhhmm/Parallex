@@ -13,13 +13,22 @@ export interface AgentDef {
   icon: string    // emoji
 }
 
-const AGENT_LIBRARY: AgentDef[] = [
-  { id: 'research', name: 'Research Analyst',     role: 'Scans on-chain data & protocols',    fee: '0.05 MON', color: '#836EFB', icon: '🔍' },
-  { id: 'data',     name: 'Data Processor',       role: 'Normalises & structures datasets',   fee: '0.04 MON', color: '#00D1FF', icon: '⚙️' },
-  { id: 'writer',   name: 'Content Writer',       role: 'Produces polished reports & copy',   fee: '0.06 MON', color: '#CCFF00', icon: '✍️' },
-  { id: 'contract', name: 'Contract Deployer',    role: 'Writes & deploys Solidity on Monad', fee: '0.12 MON', color: '#FF6B6B', icon: '📜' },
-  { id: 'trader',   name: 'DeFi Trader',          role: 'Executes swaps across DEXs',         fee: '0.08 MON', color: '#FFA500', icon: '📈' },
-  { id: 'translate',name: 'Translator',           role: 'Localises content in 40+ languages', fee: '0.03 MON', color: '#34d399', icon: '🌏' },
+export const AGENT_LIBRARY: AgentDef[] = [
+  { id: 'research',    name: 'Research Analyst',  role: 'Scans on-chain data & protocols',    fee: '0.010 MON', color: '#836EFB', icon: '🔍' },
+  { id: 'contract',    name: 'Code Engineer',     role: 'Writes & deploys Solidity on Monad', fee: '0.030 MON', color: '#FF6B6B', icon: '📜' },
+  { id: 'writer',      name: 'Content Writer',    role: 'Produces polished reports & copy',   fee: '0.008 MON', color: '#CCFF00', icon: '✍️' },
+  { id: 'data',        name: 'Data Processor',    role: 'Normalises & structures datasets',   fee: '0.015 MON', color: '#00D1FF', icon: '⚙️' },
+  { id: 'translate',   name: 'Translator',        role: 'Localises content in 40+ languages', fee: '0.005 MON', color: '#34d399', icon: '🌏' },
+  { id: 'trader',      name: 'Strategy Advisor',  role: 'Opinionated strategic recs',         fee: '0.040 MON', color: '#FFA500', icon: '📈' },
+  { id: 'summarizer',  name: 'Summarizer',        role: 'Condenses long text into bullets',   fee: '0.006 MON', color: '#A78BFA', icon: '📝' },
+  { id: 'qabot',       name: 'Q&A Bot',           role: 'Answers questions directly',         fee: '0.005 MON', color: '#60A5FA', icon: '❓' },
+  { id: 'emailer',     name: 'Email Drafter',     role: 'Drafts professional emails',         fee: '0.008 MON', color: '#FBBF24', icon: '✉️' },
+  { id: 'critic',      name: 'Critic',            role: 'Constructive feedback & review',     fee: '0.010 MON', color: '#F472B6', icon: '🧐' },
+  { id: 'outliner',    name: 'Outline Builder',   role: 'Structures topics into outlines',    fee: '0.007 MON', color: '#22D3EE', icon: '📋' },
+  { id: 'ideator',     name: 'Idea Generator',    role: 'Brainstorms creative ideas',         fee: '0.009 MON', color: '#FB923C', icon: '💡' },
+  { id: 'mathsolver',  name: 'Math Solver',       role: 'Solves problems step by step',       fee: '0.006 MON', color: '#4ADE80', icon: '🧮' },
+  { id: 'factchecker', name: 'Fact Checker',      role: 'Verifies claims & sources',          fee: '0.012 MON', color: '#F87171', icon: '✅' },
+  { id: 'tutor',       name: 'Tutor',             role: 'Explains concepts with analogies',   fee: '0.008 MON', color: '#C084FC', icon: '🎓' },
 ]
 
 const P = '#836EFB'   // Monad Purple
@@ -129,6 +138,9 @@ export default function WorkflowBuilder({ workflow, onWorkflowChange, onRun, onR
                 border: '1px solid rgba(131,110,251,0.3)',
                 borderRadius: 14, padding: 10,
                 backdropFilter: 'blur(20px)',
+                maxHeight: 360,
+                overflowY: 'auto',
+                overscrollBehavior: 'contain',
               }}
             >
               {AGENT_LIBRARY.map(agent => {
