@@ -3,14 +3,17 @@
 import dynamic from 'next/dynamic'
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Zap, ArrowLeft, Wallet } from 'lucide-react'
+import { Zap, ArrowLeft, Wallet, Sparkles, Bookmark, FolderOpen, Check } from 'lucide-react'
 import Link from 'next/link'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { usePrivy, useWallets } from '@privy-io/react-auth'
-import WorkflowBuilder, { type AgentDef } from '@/components/workflow/WorkflowBuilder'
+import WorkflowBuilder, { type AgentDef, AGENT_LIBRARY } from '@/components/workflow/WorkflowBuilder'
 import ExecutionTimeline from '@/components/workflow/ExecutionTimeline'
 import TxTicker from '@/components/workflow/TxTicker'
+import EscrowOverlay from '@/components/workflow/EscrowOverlay'
 import { useWorkflow } from '@/hooks/useWorkflow'
 import { publicClient } from '@/lib/chain'
+import { saveStack, touchStack } from '@/lib/stacks'
 
 function shortAddr(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`
@@ -29,9 +32,50 @@ const StarField = dynamic(() => import('@/components/workflow/StarField'), { ssr
 
 export default function WorkflowPage() {
   const [workflow, setWorkflow] = useState<AgentDef[]>([])
+  const [intent, setIntent] = useState('')
+
+  const searchParams = useSearchParams()
+  const router = useRouter()
+
+  // Deep-link loader: /workflow?agents=research,outliner,writer&intent=...&stackId=...
+  // Lets /stacks send the user here with a pre-filled pipeline.
+  const loadedStackIdRef = useRef<string | null>(null)
+  const [loadedFromStack, setLoadedFromStack] = useState(false)
+  useEffect(() => {
+    const agentsParam = searchParams.get('agents')
+    if (!agentsParam) return
+    const ids = agentsParam.split(',').map(s => s.trim()).filter(Boolean)
+    const next = ids
+      .map(id => AGENT_LIBRARY.find(a => a.id === id))
+      .filter((a): a is AgentDef => !!a)
+    if (next.length > 0) {
+      setWorkflow(next)
+      const stackId = searchParams.get('stackId')
+      if (stackId) {
+        loadedStackIdRef.current = stackId
+        setLoadedFromStack(true)
+      }
+      const intentParam = searchParams.get('intent')
+      if (intentParam) setIntent(intentParam)
+    }
+    // Strip params so refresh doesn't keep reloading them
+    router.replace('/workflow', { scroll: false })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const agentIds = workflow.map(a => a.id)
-  const { agents, running, complete, summary, payments, start, reset } = useWorkflow(agentIds)
+  const { agents, running, complete, summary, payments, start, reset, escrow } = useWorkflow(
+    agentIds,
+    { task: intent },
+  )
+
+  // Bump "lastUsed" when a deep-linked stack actually runs to completion
+  useEffect(() => {
+    if (complete && loadedStackIdRef.current) {
+      touchStack(loadedStackIdRef.current)
+      loadedStackIdRef.current = null
+    }
+  }, [complete])
 
   const cardRefs  = useRef<Record<string, HTMLDivElement | null>>({})
   const vaultRef  = useRef<HTMLDivElement | null>(null)
@@ -66,6 +110,127 @@ export default function WorkflowPage() {
     reset()
   }, [reset])
 
+  // ───── AI auto-compose: user types a goal, Ollama picks agents ─────
+  const [composing, setComposing] = useState(false)
+  const [composeNote, setComposeNote] = useState<string | null>(null)
+
+  // ───── Save-stack flow: collect a name post-run and persist locally ─────
+  const [stackName, setStackName] = useState('')
+  const [savedStackId, setSavedStackId] = useState<string | null>(null)
+  const [suggestingName, setSuggestingName] = useState(false)
+
+  // Keep a live ref of stackName so the async name-suggest can decide whether
+  // to overwrite, without re-running on every keystroke.
+  const stackNameRef = useRef(stackName)
+  stackNameRef.current = stackName
+
+  const workflowKey = workflow.map(a => a.id).join(',')
+
+  // If the workflow composition changes, clear "saved" so the user can save the new shape
+  useEffect(() => {
+    setSavedStackId(null)
+    // Also reset the name-suggest gate so the next completion can suggest again
+    nameSuggestionRequestedRef.current = false
+  }, [workflowKey])
+
+  // Auto-suggest a stack name after a successful run.
+  // Fires once per workflow composition. Won't overwrite a name the user typed.
+  const nameSuggestionRequestedRef = useRef(false)
+  useEffect(() => {
+    if (!complete || workflow.length === 0) return
+    if (nameSuggestionRequestedRef.current) return
+    if (stackNameRef.current.trim().length > 0) return
+    nameSuggestionRequestedRef.current = true
+
+    const ac = new AbortController()
+    setSuggestingName(true)
+    fetch('/api/compose-name', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        intent: intent || undefined,
+        agentNames: workflow.map(a => a.name),
+      }),
+      signal: ac.signal,
+    })
+      .then(r => r.json() as Promise<{ name?: string }>)
+      .then(data => {
+        // Only fill if the user STILL hasn't typed anything by now
+        if (data.name && !stackNameRef.current.trim()) {
+          setStackName(data.name)
+        }
+      })
+      .catch(() => { /* silent — user can still type their own name */ })
+      .finally(() => setSuggestingName(false))
+    return () => ac.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [complete, workflowKey])
+
+  const [savingStack, setSavingStack] = useState(false)
+  const handleSaveStack = useCallback(async () => {
+    if (workflow.length === 0 || savingStack) return
+    setSavingStack(true)
+
+    // Generalise the intent first so the saved stack is a reusable template,
+    // not a one-off "RM 87 with Ali / Ahmad" instance.
+    let templateIntent = intent.trim()
+    if (templateIntent) {
+      try {
+        const res = await fetch('/api/generalize-intent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ intent: templateIntent }),
+        })
+        const data = await res.json() as { generalized?: string }
+        if (data.generalized) templateIntent = data.generalized
+      } catch {
+        // network/LLM hiccup — fall through with the raw intent
+      }
+    }
+
+    const stack = saveStack({
+      name: stackName,
+      agentIds: workflow.map(a => a.id),
+      intent: templateIntent || undefined,
+    })
+    setSavedStackId(stack.id)
+    setStackName('')
+    setSavingStack(false)
+  }, [workflow, intent, stackName, savingStack])
+
+  const handleCompose = useCallback(async () => {
+    const task = intent.trim()
+    if (!task || composing) return
+    setComposing(true)
+    setComposeNote(null)
+    try {
+      const res = await fetch('/api/compose', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task }),
+      })
+      const data = await res.json() as { agentIds?: string[]; source?: string }
+      const ids = data.agentIds ?? []
+      const next = ids
+        .map(id => AGENT_LIBRARY.find(a => a.id === id))
+        .filter((a): a is AgentDef => !!a)
+      if (next.length === 0) {
+        setComposeNote('Could not compose a pipeline — try a more specific goal.')
+      } else {
+        setWorkflow(next)
+        setComposeNote(
+          data.source === 'fallback'
+            ? `${next.length} agents picked (keyword fallback — model declined).`
+            : `${next.length} agents picked for you. Review, then run.`
+        )
+      }
+    } catch (e) {
+      setComposeNote(`Compose failed: ${e instanceof Error ? e.message : 'unknown'}`)
+    } finally {
+      setComposing(false)
+    }
+  }, [intent, composing])
+
   const activePayments = running || complete
 
   return (
@@ -83,6 +248,14 @@ export default function WorkflowPage() {
 
       {/* Ticker */}
       <TxTicker active={activePayments} />
+
+      {/* Escrow lock-funds overlay — pre/during/just-after MetaMask */}
+      <EscrowOverlay
+        stage={escrow.stage}
+        preview={escrow.preview}
+        totalMon={escrow.totalMon}
+        txHash={escrow.txHash}
+      />
 
       {/* ── Top bar ────────────────────────────────────────────── */}
       <header style={{
@@ -105,6 +278,21 @@ export default function WorkflowPage() {
             WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
           }}>PARALLEX</span>
           <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)', letterSpacing: '0.2em' }}>COMMAND CENTER</span>
+          <div style={{ width: 1, height: 18, background: 'rgba(255,255,255,0.08)', marginLeft: 6 }} />
+          <Link
+            href="/stacks"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5,
+              color: 'rgba(255,255,255,0.5)', textDecoration: 'none',
+              fontSize: 11, letterSpacing: '0.15em', textTransform: 'uppercase',
+              fontFamily: 'var(--font-space-grotesk)', fontWeight: 600,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = '#fff' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.5)' }}
+          >
+            <FolderOpen size={12} />
+            My Stacks
+          </Link>
         </div>
 
         {/* Center: status */}
@@ -223,6 +411,113 @@ export default function WorkflowPage() {
           display: 'flex', flexDirection: 'column',
           minHeight: 500,
         }}>
+          {/* Template-loaded hint — only appears when /stacks deep-linked here */}
+          {loadedFromStack && (
+            <div style={{
+              marginBottom: 12,
+              padding: '8px 12px',
+              background: 'rgba(204,255,0,0.06)',
+              border: '1px solid rgba(204,255,0,0.25)',
+              borderRadius: 10,
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+            }}>
+              <span style={{
+                fontSize: 11, color: 'rgba(255,255,255,0.7)',
+                fontFamily: 'var(--font-space-grotesk)',
+              }}>
+                <span style={{ color: L, fontWeight: 700, letterSpacing: '0.08em' }}>💡 TEMPLATE LOADED</span>
+                {'  '}— refine the goal with this run&apos;s specifics, then click RUN.
+              </span>
+              <button
+                onClick={() => setLoadedFromStack(false)}
+                title="Dismiss"
+                style={{
+                  background: 'none', border: 'none', padding: 0,
+                  color: 'rgba(255,255,255,0.35)', cursor: 'pointer',
+                  fontSize: 14, lineHeight: 1,
+                }}
+                onMouseEnter={e => { e.currentTarget.style.color = '#fff' }}
+                onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.35)' }}
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* AI auto-compose: describe goal → Ollama picks agents */}
+          <div style={{
+            marginBottom: 16,
+            padding: '12px 14px',
+            background: 'rgba(131,110,251,0.06)',
+            border: '1px solid rgba(131,110,251,0.22)',
+            borderRadius: 12,
+          }}>
+            <p style={{
+              fontSize: 9, letterSpacing: '0.45em', color: P, textTransform: 'uppercase',
+              margin: '0 0 8px', fontFamily: 'var(--font-space-grotesk)', fontWeight: 700,
+            }}>
+              DESCRIBE YOUR GOAL
+            </p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                value={intent}
+                onChange={e => setIntent(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleCompose() }}
+                placeholder='e.g. "research for my FYP", "translate my whitepaper to Bahasa"'
+                disabled={composing || running}
+                style={{
+                  flex: 1, height: 38, padding: '0 12px',
+                  background: 'rgba(0,0,0,0.4)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: 9,
+                  color: '#fff', fontSize: 12, outline: 'none',
+                  fontFamily: 'var(--font-space-grotesk)',
+                }}
+              />
+              <button
+                onClick={handleCompose}
+                disabled={composing || running || !intent.trim()}
+                style={{
+                  height: 38, padding: '0 14px',
+                  background: composing || !intent.trim() || running
+                    ? 'rgba(131,110,251,0.25)'
+                    : `linear-gradient(135deg, ${P}, #4f46e5)`,
+                  border: 'none', borderRadius: 9,
+                  color: '#fff', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
+                  cursor: composing || !intent.trim() || running ? 'not-allowed' : 'pointer',
+                  whiteSpace: 'nowrap',
+                  fontFamily: 'var(--font-space-grotesk)',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}
+              >
+                {composing ? (
+                  <>
+                    <span style={{
+                      width: 11, height: 11, borderRadius: '50%',
+                      border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff',
+                      animation: 'wspin 0.7s linear infinite',
+                    }} />
+                    THINKING
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={12} />
+                    AUTO-COMPOSE
+                  </>
+                )}
+              </button>
+            </div>
+            {composeNote && (
+              <p style={{
+                marginTop: 8, marginBottom: 0,
+                fontSize: 10, color: 'rgba(204,255,0,0.7)',
+                fontFamily: 'var(--font-space-grotesk)', letterSpacing: '0.02em',
+              }}>
+                {composeNote}
+              </p>
+            )}
+          </div>
+
           <WorkflowBuilder
             workflow={workflow}
             onWorkflowChange={setWorkflow}
@@ -231,6 +526,88 @@ export default function WorkflowPage() {
             running={running}
             complete={complete}
           />
+
+          {/* Save-stack UI: appears after a successful run */}
+          {complete && workflow.length > 0 && (
+            <div style={{
+              marginTop: 14,
+              padding: '12px 14px',
+              background: savedStackId ? 'rgba(204,255,0,0.06)' : 'rgba(204,255,0,0.04)',
+              border: `1px solid ${savedStackId ? 'rgba(204,255,0,0.35)' : 'rgba(204,255,0,0.18)'}`,
+              borderRadius: 12,
+              transition: 'all 0.3s ease',
+            }}>
+              {savedStackId ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: L, fontFamily: 'var(--font-space-grotesk)', fontWeight: 600 }}>
+                    <Check size={14} />
+                    Stack saved to your collection.
+                  </span>
+                  <Link
+                    href="/stacks"
+                    style={{
+                      fontSize: 11, color: L, textDecoration: 'none',
+                      letterSpacing: '0.1em', textTransform: 'uppercase',
+                      fontFamily: 'var(--font-space-grotesk)', fontWeight: 700,
+                    }}
+                  >
+                    View →
+                  </Link>
+                </div>
+              ) : (
+                <>
+                  <p style={{
+                    fontSize: 9, letterSpacing: '0.45em', color: L, textTransform: 'uppercase',
+                    margin: '0 0 8px', fontFamily: 'var(--font-space-grotesk)', fontWeight: 700,
+                  }}>
+                    SAVE THIS STACK
+                  </p>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input
+                      value={stackName}
+                      onChange={e => setStackName(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') handleSaveStack() }}
+                      placeholder={
+                        suggestingName
+                          ? '✨ Suggesting a name…'
+                          : intent
+                            ? intent.slice(0, 40)
+                            : 'Name this pipeline (e.g. "FYP Research")'
+                      }
+                      style={{
+                        flex: 1, height: 36, padding: '0 12px',
+                        background: 'rgba(0,0,0,0.4)',
+                        border: `1px solid ${suggestingName ? 'rgba(204,255,0,0.35)' : 'rgba(255,255,255,0.1)'}`,
+                        borderRadius: 9,
+                        color: '#fff', fontSize: 12, outline: 'none',
+                        fontFamily: 'var(--font-space-grotesk)',
+                        transition: 'border-color 0.3s ease',
+                      }}
+                    />
+                    <button
+                      onClick={handleSaveStack}
+                      disabled={workflow.length === 0 || savingStack}
+                      style={{
+                        height: 36, padding: '0 14px',
+                        background: savingStack
+                          ? 'rgba(204,255,0,0.35)'
+                          : `linear-gradient(135deg, ${L}, #a3e635)`,
+                        border: 'none', borderRadius: 9,
+                        color: savingStack ? 'rgba(0,0,0,0.6)' : '#000',
+                        fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
+                        cursor: savingStack ? 'wait' : 'pointer', whiteSpace: 'nowrap',
+                        fontFamily: 'var(--font-space-grotesk)',
+                        display: 'flex', alignItems: 'center', gap: 5,
+                      }}
+                    >
+                      <Bookmark size={12} fill="currentColor" />
+                      {savingStack ? 'GENERALISING…' : 'SAVE'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right: Execution Timeline */}

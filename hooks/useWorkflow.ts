@@ -21,6 +21,19 @@ export interface AgentState {
   amount?: string
 }
 
+export type EscrowStage =
+  | 'idle'
+  | 'preview'              // cost breakdown shown, about to ask wallet
+  | 'awaiting_signature'   // MetaMask popup open, user reviewing
+  | 'confirming'           // tx submitted, waiting for receipt
+  | 'locked'               // confirmed; brief celebratory moment
+
+export interface EscrowPreviewItem {
+  agentId: string  // UI string id
+  name: string
+  costMon: string  // formatted like "0.030"
+}
+
 export interface WorkflowSummary {
   totalCost: string
   duration: string
@@ -36,14 +49,27 @@ export interface PaymentEvent {
 }
 
 // UI uses string IDs ('research', 'data', etc); the on-chain registry uses
-// numeric IDs assigned in deploy.js. Keep this in sync with the seeded order.
+// numeric IDs assigned in deploy.js + seed-more-agents.js. Keep this in sync
+// with the seeded order.
 const STRING_TO_NUMERIC: Record<string, number> = {
-  research:  0, // Research Analyst
-  contract:  1, // Code Engineer (UI's "Contract Deployer" maps here)
-  writer:    2, // Content Writer
-  data:      3, // Data Processor
-  translate: 4, // Translator
-  trader:    5, // Strategy Advisor (UI's "DeFi Trader" maps here)
+  // Initial 6 from deploy.js
+  research:    0,  // Research Analyst
+  contract:    1,  // Code Engineer
+  writer:      2,  // Content Writer
+  data:        3,  // Data Processor
+  translate:   4,  // Translator
+  trader:      5,  // Strategy Advisor
+
+  // Extra 9 from seed-more-agents.js
+  summarizer:  6,
+  qabot:       7,
+  emailer:     8,
+  critic:      9,
+  outliner:    10,
+  ideator:     11,
+  mathsolver:  12,
+  factchecker: 13,
+  tutor:       14,
 }
 
 const NUMERIC_TO_STRING: Record<number, string> = Object.fromEntries(
@@ -74,11 +100,16 @@ type StreamEvent = {
   message?: string
 }
 
-export function useWorkflow(agentIds: string[]) {
+export function useWorkflow(agentIds: string[], options?: { task?: string }) {
   const idsKey = agentIds.join(',')
   const { authenticated, login, ready } = usePrivy()
   const { wallets } = useWallets()
   const wallet = wallets[0]
+
+  // Keep the current task in a ref so doRun reads the latest value without
+  // needing to be rebuilt every time the user types in the intent box.
+  const taskRef = useRef<string | undefined>(options?.task)
+  taskRef.current = options?.task
 
   const [agents,   setAgents]   = useState<Record<string, AgentState>>(() => makeInitial(agentIds))
   const [running,  setRunning]  = useState(false)
@@ -86,9 +117,22 @@ export function useWorkflow(agentIds: string[]) {
   const [summary,  setSummary]  = useState<WorkflowSummary | null>(null)
   const [payments, setPayments] = useState<PaymentEvent[]>([])
 
+  // Escrow stage machine — drives the visible "lock funds" overlay
+  const [escrowStage,    setEscrowStage]    = useState<EscrowStage>('idle')
+  const [escrowPreview,  setEscrowPreview]  = useState<EscrowPreviewItem[]>([])
+  const [escrowTxHash,   setEscrowTxHash]   = useState<`0x${string}` | null>(null)
+  const [escrowTotalMon, setEscrowTotalMon] = useState<string>('0')
+
   const agentPricesRef  = useRef<Record<number, bigint>>({})
   const pendingStartRef = useRef(false)
   const abortRef        = useRef<AbortController | null>(null)
+
+  const resetEscrow = () => {
+    setEscrowStage('idle')
+    setEscrowPreview([])
+    setEscrowTxHash(null)
+    setEscrowTotalMon('0')
+  }
 
   // Reset whenever the workflow composition changes
   useEffect(() => {
@@ -99,6 +143,7 @@ export function useWorkflow(agentIds: string[]) {
     setSummary(null)
     setPayments([])
     setAgents(makeInitial(agentIds))
+    resetEscrow()
   }, [idsKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cancel any in-flight stream on unmount
@@ -188,19 +233,50 @@ export function useWorkflow(agentIds: string[]) {
       }
 
       // 2. Fetch on-chain agent prices so we can compute total cost
-      const agentsRes  = await fetch('/api/agents', { signal: ac.signal })
+      const agentsRes  = await fetch('/api/agents', { signal: ac.signal, cache: 'no-store' })
       const agentsData = await agentsRes.json() as {
-        agents?: Array<{ id: number; pricePerTask: string }>
+        agents?: Array<{ id: number; name: string; pricePerTask: string; active?: boolean }>
       }
       const allAgents = agentsData.agents ?? []
 
       let totalCost = 0n
+      const missing: number[] = []
       for (const id of numericIds) {
         const a = allAgents.find(x => x.id === id)
-        const price = BigInt(a?.pricePerTask ?? '0')
+        if (!a) {
+          missing.push(id)
+          continue
+        }
+        const price = BigInt(a.pricePerTask ?? '0')
         agentPricesRef.current[id] = price
         totalCost += price
       }
+      if (missing.length > 0) {
+        // Hard fail: if we submit without the right value, the tx reverts on-chain
+        // and the user just loses gas. Surfacing the cause early is much kinder.
+        throw new Error(
+          `Some agents are not in the on-chain registry: ${missing.join(', ')}.\n` +
+          `The /api/agents endpoint returned ${allAgents.length} agents but the workflow needs ` +
+          `IDs up to ${Math.max(...numericIds)}. Run the seed script (` +
+          `contracts/scripts/seed-more-agents.js) and restart the dev server.`
+        )
+      }
+
+      // 2.5. Show the escrow preview — gives the audience a beat to see WHAT
+      // is about to be paid for before MetaMask blocks the screen.
+      const previewItems: EscrowPreviewItem[] = numericIds.map(numId => {
+        const a = allAgents.find(x => x.id === numId)
+        return {
+          agentId: NUMERIC_TO_STRING[numId] ?? `id-${numId}`,
+          name: a?.name ?? `Agent ${numId}`,
+          costMon: (Number(BigInt(a?.pricePerTask ?? '0')) / 1e18).toFixed(3),
+        }
+      })
+      setEscrowPreview(previewItems)
+      setEscrowTotalMon((Number(totalCost) / 1e18).toFixed(3))
+      setEscrowStage('preview')
+      // Brief theatrical pause so the breakdown is readable on stage
+      await new Promise(r => setTimeout(r, 900))
 
       // 3. Build viem wallet client from Privy's embedded/injected provider
       const provider = (await wallet.getEthereumProvider()) as EIP1193Provider
@@ -230,6 +306,7 @@ export function useWorkflow(agentIds: string[]) {
       }
 
       // 4. Deposit into escrow — this is the user's MetaMask popup
+      setEscrowStage('awaiting_signature')
       const txHash = await walletClient.writeContract({
         address: ESCROW_ADDRESS,
         abi: ESCROW_ABI,
@@ -238,7 +315,14 @@ export function useWorkflow(agentIds: string[]) {
         value: totalCost,
       })
 
+      setEscrowStage('confirming')
       const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
+
+      // "Escrow locked" moment — celebratory beat before agents start working
+      setEscrowTxHash(txHash)
+      setEscrowStage('locked')
+      await new Promise(r => setTimeout(r, 1400))
+      setEscrowStage('idle')
 
       // Parse the WorkflowStarted event to learn our on-chain workflow id
       let workflowId: bigint | null = null
@@ -263,8 +347,13 @@ export function useWorkflow(agentIds: string[]) {
 
       // 5. Tell the orchestrator to start. One agent per step → sequential UX
       //    (the UI shows agents as a vertical timeline, not parallel columns).
+      //    The user's intent text is the FIRST agent's input — without this,
+      //    agents work on nothing related to the user's actual goal.
+      const userTask = taskRef.current?.trim()
       const def = {
-        task: `Workflow with ${numericIds.length} agent${numericIds.length === 1 ? '' : 's'}`,
+        task: userTask && userTask.length > 0
+          ? userTask
+          : `Pipeline with ${numericIds.length} agent${numericIds.length === 1 ? '' : 's'}`,
         steps: numericIds.map(id => ({ agentIds: [id] })),
       }
 
@@ -319,6 +408,7 @@ export function useWorkflow(agentIds: string[]) {
       if ((err as { name?: string }).name === 'AbortError') return
       console.error('[useWorkflow] failed:', err)
       setRunning(false)
+      resetEscrow()
     } finally {
       abortRef.current = null
     }
@@ -361,7 +451,22 @@ export function useWorkflow(agentIds: string[]) {
     setSummary(null)
     setPayments([])
     setAgents(makeInitial(agentIds))
+    resetEscrow()
   }, [idsKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { agents, running, complete, summary, payments, start, reset }
+  return {
+    agents,
+    running,
+    complete,
+    summary,
+    payments,
+    start,
+    reset,
+    escrow: {
+      stage: escrowStage,
+      preview: escrowPreview,
+      txHash: escrowTxHash,
+      totalMon: escrowTotalMon,
+    },
+  }
 }
